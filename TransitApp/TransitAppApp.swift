@@ -1,32 +1,19 @@
-//
-//  TransitAppApp.swift
-//  TransitApp
-//
-//  Created by Henry Lam on 2/5/2025.
-//
-
 import SwiftUI
-import SwiftData
 
 @main
-struct TransitAppApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+struct ConnectingHongKongApp: App {
+        // Initialize environment objects
 
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    private let transitService = TransitService()
+    private let userPreferences = UserPreferences()
+    private let locationManager = LocationManager()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(transitService)
+                .environmentObject(userPreferences)
+                .environmentObject(locationManager)
         }
-        .modelContainer(sharedModelContainer)
     }
 }

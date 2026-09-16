@@ -1,10 +1,3 @@
-//
-//  Item.swift
-//  TransitApp
-//
-//  Created by Henry Lam on 2/5/2025.
-//
-
 import Foundation
 import SwiftData
 
