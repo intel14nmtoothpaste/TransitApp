@@ -6,6 +6,7 @@ import UserNotifications
 import AVFoundation
 import CoreLocation
 import Foundation
+import CryptoKit
 
     // MARK: - API Client Protocol
 protocol APIClient {
@@ -715,6 +716,18 @@ class TransitService: ObservableObject, APIClient {
         }
     }
 
+    private let cacheEncryptionKey = SymmetricKey(size: .bits256)
+
+    private func encryptForCache(_ value: String) -> String? {
+        guard let plaintext = value.data(using: .utf8) else { return nil }
+        do {
+            let sealedBox = try AES.GCM.seal(plaintext, using: cacheEncryptionKey)
+            return sealedBox.combined?.base64EncodedString()
+        } catch {
+            return nil
+        }
+    }
+
     private func cacheRoutes(_ routes: [TransitRoute]) {
         let context = PersistenceController.shared.container.newBackgroundContext()
         context.perform {
@@ -748,8 +761,10 @@ class TransitService: ObservableObject, APIClient {
                     vehicleEntity.setValue(vehicle.type, forKey: "type")
                     vehicleEntity.setValue(vehicle.routeInnerId, forKey: "routeInnerId")
                     vehicleEntity.setValue(vehicle.eta, forKey: "eta")
-                    vehicleEntity.setValue(vehicle.currentLocation?.latitude, forKey: "latitude")
-                    vehicleEntity.setValue(vehicle.currentLocation?.longitude, forKey: "longitude")
+                    let encryptedLatitude = vehicle.currentLocation?.latitude.flatMap { self.encryptForCache(String($0)) }
+                    let encryptedLongitude = vehicle.currentLocation?.longitude.flatMap { self.encryptForCache(String($0)) }
+                    vehicleEntity.setValue(encryptedLatitude, forKey: "latitude")
+                    vehicleEntity.setValue(encryptedLongitude, forKey: "longitude")
                 }
                 try context.save()
             } catch {
