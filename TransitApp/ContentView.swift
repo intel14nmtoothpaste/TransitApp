@@ -174,7 +174,8 @@ struct KMBStopResponse: Codable {
     let type: String?
     let version: String?
     let generatedTimestamp: String?
-    let data: [KMBStop]
+    let data: [KMBStop]?
+    let stops: [KMBStop]?
     struct KMBStop: Codable {
         let stop: String
         let nameEn: String
@@ -194,8 +195,8 @@ struct CTBStopResponse: Codable {
     struct CTBStop: Codable {
         let stop: String
         let nameEn: String
-        let lat: Double
-        let long: Double
+        let lat: String
+        let long: String
         enum CodingKeys: String, CodingKey {
             case stop
             case nameEn = "name_en"
@@ -206,17 +207,18 @@ struct CTBStopResponse: Codable {
 }
 
 struct NLBStopResponse: Codable {
-    let stops: [NLBStop]
+    let stops: [NLBStop]?
+    let data: [NLBStop]?
     struct NLBStop: Codable {
         let stopId: String
         let stopNameEn: String
-        let lat: Double
-        let long: Double
+        let lat: String
+        let long: String
         enum CodingKeys: String, CodingKey {
             case stopId
-            case stopNameEn = "stopName_en"
-            case lat
-            case long
+            case stopNameEn = "stopName_e"
+            case lat = "latitude"
+            case long = "longitude"
         }
     }
 }
@@ -296,14 +298,20 @@ struct NLBETAResponse: Codable {
     struct NLBETA: Codable {
         let estimatedArrivalTime: String?
         let routeId: String
-        let lat: Double?
-        let long: Double?
+        let lat: String?
+        let long: String?
+        enum CodingKeys: String, CodingKey {
+            case estimatedArrivalTime = "estimated_arrival_time"
+            case routeId
+            case lat
+            case long
+        }
     }
 }
 
 struct MTRScheduleResponse: Codable {
-    let status: Int
-    let message: String
+    let status: Int?
+    let message: String?
     let data: [String: MTRLineData]
     struct MTRLineData: Codable {
         let up: [MTRSchedule]?
@@ -322,6 +330,10 @@ struct MTRScheduleResponse: Codable {
 struct LightRailScheduleResponse: Codable {
     let platformList: [Platform]?
     let error: String?
+    enum CodingKeys: String, CodingKey {
+        case platformList = "platform_list"
+        case error
+    }
     struct Platform: Codable {
         let routeList: [Train]?
         enum CodingKeys: String, CodingKey {
@@ -332,7 +344,7 @@ struct LightRailScheduleResponse: Codable {
         let time: String?
         let destEn: String?
         enum CodingKeys: String, CodingKey {
-            case time
+            case time = "time_en"
             case destEn = "dest_en"
         }
     }
@@ -404,46 +416,73 @@ class TransitService: ObservableObject, APIClient {
         }
     }
 
+    private func coordinates(latitude: String?, longitude: String?) -> CLLocationCoordinate2D? {
+        guard let latitude, let longitude,
+              let latitude = Double(latitude), let longitude = Double(longitude) else {
+            return nil
+        }
+        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    private func coordinates(latitude: Double?, longitude: Double?) -> CLLocationCoordinate2D? {
+        guard let latitude, let longitude else { return nil }
+        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
     func fetchStops() async {
         await loadCachedStops()
         var allStops: [StopResponse] = []
 
         do {
-                // Fetch KMB Stops
             if let kmbUrl = URL(string: "https://data.etabus.gov.hk/v1/transport/kmb/stop") {
                 let response: KMBStopResponse = try await fetch(kmbUrl)
-                let stops: [StopResponse] = response.data.map { StopResponse(stopId: $0.stop, nameEn: $0.nameEn, lat: $0.lat, long: $0.long) }
+                let stops: [StopResponse] = (response.data ?? response.stops ?? []).map {
+                    StopResponse(stopId: $0.stop, nameEn: $0.nameEn, lat: $0.lat, long: $0.long)
+                }
                 allStops.append(contentsOf: stops)
             } else {
                 logError(URLError(.badURL), context: "fetchStops - Invalid KMB stop URL")
             }
+        } catch {
+            logError(error, context: "fetchStops - KMB")
+        }
 
-                // Fetch CTB Stop
+        do {
             if let ctbUrl = URL(string: "https://rt.data.gov.hk/v2/transport/citybus/stop/001007") {
                 let response: CTBStopResponse = try await fetch(ctbUrl)
-                let stop = StopResponse(stopId: response.data.stop, nameEn: response.data.nameEn, lat: response.data.lat, long: response.data.long)
-                allStops.append(stop) // Use append(_:) for single element
+                guard let latitude = Double(response.data.lat),
+                      let longitude = Double(response.data.long) else {
+                    throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Citybus returned invalid coordinates"))
+                }
+                let stop = StopResponse(stopId: response.data.stop, nameEn: response.data.nameEn, lat: latitude, long: longitude)
+                allStops.append(stop)
             } else {
                 logError(URLError(.badURL), context: "fetchStops - Invalid CTB stop URL")
             }
+        } catch {
+            logError(error, context: "fetchStops - Citybus")
+        }
 
-                // Fetch NLB Stops
-            if let nlbUrl = URL(string: "https://rt.data.gov.hk/v2/transport/nlb/stop.php?action=list&routeId=NA12") {
+        do {
+            if let nlbUrl = URL(string: "https://rt.data.gov.hk/v2/transport/nlb/stop.php?action=list&routeId=1A") {
                 let response: NLBStopResponse = try await fetch(nlbUrl)
-                let stops: [StopResponse] = response.stops.map { StopResponse(stopId: $0.stopId, nameEn: $0.stopNameEn, lat: $0.lat, long: $0.long) }
+                let stops: [StopResponse] = (response.stops ?? response.data ?? []).compactMap {
+                    guard let latitude = Double($0.lat), let longitude = Double($0.long) else { return nil }
+                    return StopResponse(stopId: $0.stopId, nameEn: $0.stopNameEn, lat: latitude, long: longitude)
+                }
                 allStops.append(contentsOf: stops)
             } else {
                 logError(URLError(.badURL), context: "fetchStops - Invalid NLB stop URL")
             }
-
-            await MainActor.run {
-                self.stops = Array(Set(allStops))
-                self.cacheStops(allStops)
-                print("Fetched stops: \(allStops.map { $0.nameEn })")
-            }
         } catch {
-            logError(error, context: "fetchStops")
-            await loadCachedStops()
+            logError(error, context: "fetchStops - NLB")
+        }
+
+        await MainActor.run {
+            let uniqueStops = Array(Set(allStops))
+            self.stops = uniqueStops
+            self.cacheStops(uniqueStops)
+            print("Fetched stops: \(uniqueStops.map { $0.nameEn })")
         }
     }
 
@@ -541,8 +580,7 @@ class TransitService: ObservableObject, APIClient {
                         if let url = URL(string: "https://data.etabus.gov.hk/v1/transport/kmb/eta/\(stopId)/1A/1") {
                             let etaResponse: KMBETAResponse = try await fetch(url)
                             let kmbVehicles: [Vehicle] = etaResponse.data.map { eta in
-                                let location = (eta.lat != nil && eta.long != nil) ?
-                                CLLocationCoordinate2D(latitude: eta.lat!, longitude: eta.long!) : nil
+                                let location = coordinates(latitude: eta.lat, longitude: eta.long)
                                 return Vehicle(
                                     id: "KMB-\(stopId)-\(eta.eta ?? "")",
                                     type: "Bus",
@@ -558,8 +596,7 @@ class TransitService: ObservableObject, APIClient {
                         if let url = URL(string: "https://rt.data.gov.hk/v2/transport/citybus/eta/\(company)/\(stopId)/5B") {
                             let etaResponse: CTBETAResponse = try await fetch(url)
                             let ctbVehicles: [Vehicle] = etaResponse.data.map { eta in
-                                let location = (eta.lat != nil && eta.long != nil) ?
-                                CLLocationCoordinate2D(latitude: eta.lat!, longitude: eta.long!) : nil
+                                let location = coordinates(latitude: eta.lat, longitude: eta.long)
                                 return Vehicle(
                                     id: "\(company)-\(stopId)-\(eta.eta ?? "")",
                                     type: "Bus",
@@ -572,36 +609,29 @@ class TransitService: ObservableObject, APIClient {
                         }
 
                     case "GMB":
-                        let mockData = """
-                    {"data": [{"eta": "2025-05-15 10:30:00", "remark_en": "On time"}]}
-                    """.data(using: .utf8)!
-                        let etaResponse = try JSONDecoder().decode(GMBETAResponse.self, from: mockData)
-                        let gmbVehicles: [Vehicle] = etaResponse.data?.map { eta in
-                            Vehicle(
-                                id: "GMB-\(stopId)-\(eta.eta ?? "")",
-                                type: "Minibus",
-                                routeInnerId: "10000002",
-                                currentLocation: nil,
-                                eta: eta.eta ?? "N/A"
-                            )
-                        } ?? []
-                        vehicles.append(contentsOf: gmbVehicles)
+                        // No GMB ETA endpoint is available for the route data source used here.
+                        break
 
                     case "NLB":
                         if let url = URL(string: "https://rt.data.gov.hk/v1/transport/nlb/stop.php?action=estimatedArrivals") {
-                            let body: [String: Any] = ["routeId": "NA12", "stopId": stopId, "language": "en"]
+                            let body: [String: String] = ["routeId": "1A", "stopId": stopId, "language": "en"]
                             var request = URLRequest(url: url)
                             request.httpMethod = "POST"
-                            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+                            request.httpBody = body
+                                .map { key, value in
+                                    let encodedValue = String(describing: value).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+                                    return "\(key)=\(encodedValue)"
+                                }
+                                .joined(separator: "&")
+                                .data(using: .utf8)
                             let (data, response) = try await URLSession.shared.data(for: request)
                             guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                                 throw URLError(.init(rawValue: (response as? HTTPURLResponse)?.statusCode ?? -1))
                             }
                             let etaResponse = try JSONDecoder().decode(NLBETAResponse.self, from: data)
                             let nlbVehicles: [Vehicle] = etaResponse.estimatedArrivals?.map { eta in
-                                let location = (eta.lat != nil && eta.long != nil) ?
-                                CLLocationCoordinate2D(latitude: eta.lat!, longitude: eta.long!) : nil
+                                let location = coordinates(latitude: eta.lat, longitude: eta.long)
                                 return Vehicle(
                                     id: "NLB-\(stopId)-\(eta.estimatedArrivalTime ?? "")",
                                     type: "Bus",
