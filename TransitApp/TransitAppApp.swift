@@ -1,19 +1,29 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct ConnectingHongKongApp: App {
-        // Initialize environment objects
+    @StateObject private var transitStore = TransitStore()
+    @StateObject private var locationStore = LocationStore()
+    private let modelContainer: ModelContainer
 
-    private let transitService = TransitService()
-    private let userPreferences = UserPreferences()
-    private let locationManager = LocationManager()
+    init() {
+        do {
+            modelContainer = try ModelContainer(for: CachedTransitSnapshot.self)
+        } catch {
+            fatalError("Unable to configure local transit cache: \(error)")
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(transitService)
-                .environmentObject(userPreferences)
-                .environmentObject(locationManager)
+            TransitAppRootView()
+                .environmentObject(transitStore)
+                .environmentObject(locationStore)
+                .modelContainer(modelContainer)
+                .task {
+                    transitStore.attach(context: modelContainer.mainContext)
+                }
         }
     }
 }
