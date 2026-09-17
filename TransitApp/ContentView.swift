@@ -738,6 +738,12 @@ class TransitService: ObservableObject, APIClient {
         }
     }
 
+    private func roundedCoordinate(_ value: Double?, decimals: Int = 3) -> Double? {
+        guard let value = value else { return nil }
+        let multiplier = pow(10.0, Double(decimals))
+        return (value * multiplier).rounded() / multiplier
+    }
+
     private func cacheVehicles(_ vehicles: [Vehicle]) {
         let context = PersistenceController.shared.container.newBackgroundContext()
         context.perform {
@@ -748,8 +754,8 @@ class TransitService: ObservableObject, APIClient {
                     vehicleEntity.setValue(vehicle.type, forKey: "type")
                     vehicleEntity.setValue(vehicle.routeInnerId, forKey: "routeInnerId")
                     vehicleEntity.setValue(vehicle.eta, forKey: "eta")
-                    vehicleEntity.setValue(vehicle.currentLocation?.latitude, forKey: "latitude")
-                    vehicleEntity.setValue(vehicle.currentLocation?.longitude, forKey: "longitude")
+                    vehicleEntity.setValue(self.roundedCoordinate(vehicle.currentLocation?.latitude), forKey: "latitude")
+                    vehicleEntity.setValue(self.roundedCoordinate(vehicle.currentLocation?.longitude), forKey: "longitude")
                 }
                 try context.save()
             } catch {
