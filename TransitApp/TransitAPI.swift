@@ -147,8 +147,8 @@ struct NLBProvider: TransitProvider {
 struct TransitProviderRegistry: Sendable {
     let providers: [any TransitProvider]
 
-    init() {
-        providers = [KMBProvider(), CitybusProvider(), NLBProvider(), MTRProvider()]
+    init(providers: [any TransitProvider] = [KMBProvider(), CitybusProvider(), NLBProvider(), MTRProvider()]) {
+        self.providers = providers
     }
 
     func fetchAll(using client: TransitHTTPClient) async -> (TransitSnapshot, [FeedStatus]) {

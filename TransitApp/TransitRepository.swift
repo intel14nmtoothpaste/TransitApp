@@ -23,10 +23,15 @@ final class TransitStore: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published var lastError: String?
 
-    private let registry = TransitProviderRegistry()
-    private let client = TransitHTTPClient()
+    private let registry: TransitProviderRegistry
+    private let client: TransitHTTPClient
     private var modelContext: ModelContext?
     private var refreshTask: Task<Void, Never>?
+
+    init(registry: TransitProviderRegistry = TransitProviderRegistry(), client: TransitHTTPClient = TransitHTTPClient()) {
+        self.registry = registry
+        self.client = client
+    }
 
     func attach(context: ModelContext) {
         modelContext = context
