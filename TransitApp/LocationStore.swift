@@ -2,6 +2,7 @@
 import Combine
 import Foundation
 
+/// Wraps Core Location so the map and nearby-stop ranking can react to permission changes.
 @MainActor
 final class LocationStore: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published private(set) var coordinate: CLLocationCoordinate2D?

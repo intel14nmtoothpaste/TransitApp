@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import SwiftData
 
+/// Persisted cache for the last successful snapshot fetched from the network.
 @Model
 final class CachedTransitSnapshot {
     @Attribute(.unique) var id: String
@@ -16,6 +17,7 @@ final class CachedTransitSnapshot {
     }
 }
 
+/// Runtime coordinator for transit refreshes, provider health, and cached fallback behavior.
 @MainActor
 final class TransitStore: ObservableObject {
     @Published private(set) var snapshot = TransitSnapshot()
@@ -35,17 +37,24 @@ final class TransitStore: ObservableObject {
         self.client = client
     }
 
+    /// Connects the store to SwiftData so a cached snapshot can be restored on startup.
     func attach(context: ModelContext) {
         modelContext = context
         loadCache()
     }
 
+    /// Fetches fresh provider payloads and merges them into the current snapshot.
+    ///
+    /// If a refresh returns an empty result, the store preserves the last successful payload and
+    /// records a user-visible error instead of silently dropping the existing data.
     func refresh(force: Bool = false) async {
         guard !isRefreshing else { return }
         if !force, snapshot.fetchedAt.timeIntervalSinceNow > -20 { return }
         isRefreshing = true
         defer { isRefreshing = false }
 
+        // Keep one refresh in flight at a time and never overwrite the last known-good state
+        // with an empty provider result unless all feeds are actually unavailable.
         let result = await registry.fetchAll(using: client)
         let incoming = result.0
         feedStatuses = result.1
@@ -69,6 +78,7 @@ final class TransitStore: ObservableObject {
         saveCache()
     }
 
+    /// Starts a periodic polling loop that backs off exponentially when providers fail.
     func startLiveUpdates() {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
@@ -86,6 +96,7 @@ final class TransitStore: ObservableObject {
         refreshTask = nil
     }
 
+    /// Returns stops within a radius of a coordinate, sorted by proximity.
     func nearbyStops(around coordinate: CLLocationCoordinate2D, radius: CLLocationDistance = 1_500) -> [TransitStop] {
         guard radius > 0 else { return [] }
 
@@ -138,6 +149,7 @@ extension JSONEncoder {
     }
 }
 
+/// Maintains the user's persisted set of favorite stops and routes.
 @MainActor
 final class FavoritesStore: ObservableObject {
     @Published private(set) var stopIDs: Set<String>
@@ -150,11 +162,13 @@ final class FavoritesStore: ObservableObject {
         routeIDs = Set(defaults.stringArray(forKey: "favoriteRouteIDs") ?? [])
     }
 
+    /// Toggles a stop in the persisted favorites list.
     func toggleStop(_ id: String) {
         stopIDs.toggleMembership(of: id)
         defaults.set(Array(stopIDs), forKey: "favoriteStopIDs")
     }
 
+    /// Toggles a route in the persisted favorites list.
     func toggleRoute(_ id: String) {
         routeIDs.toggleMembership(of: id)
         defaults.set(Array(routeIDs), forKey: "favoriteRouteIDs")

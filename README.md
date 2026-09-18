@@ -1,19 +1,49 @@
 # Hong Kong Transit
 
-An Apple-native Hong Kong public transport app built with SwiftUI, MapKit, Core Location, Swift concurrency, and SwiftData.
+Hong Kong Transit is a SwiftUI app for tracking public transport in Hong Kong using live open-data feeds, local caching, and on-device location-aware stop discovery.
 
-## Product foundation
+## What the app does
 
-- Map-first nearby stop discovery for iPhone, iPad, and Mac Catalyst.
-- Live refresh orchestration with explicit feed health and offline cache fallback.
-- Typed provider registry for KMB, Citybus, NLB, MTR/LRT, geodata search, and shared route metadata.
-- Route, arrival, alert, accessibility, and provider-provenance domain models ready for additional data.gov.hk feeds.
-- Direct open-data calls by default, with `TransitAggregationClient` as the seam for a future server-side ETA normalizer.
+- Shows nearby stops on a map and ranks them by distance from the user's location.
+- Displays next-arrival estimates for KMB, Citybus, NLB, and MTR feeds when the source payload is available.
+- Maintains provider-level health checks so failed feeds are visible rather than silently hidden.
+- Persists the last successful transit snapshot in SwiftData for offline fallback and quick startup.
+- Keeps route, arrival, and alert data typed around provider-specific ingestion rather than a single one-size-fits-all schema.
 
-The public feeds are not uniform: some provide complete lists, some require a route or station identifier, and some are schedule rather than vehicle-position feeds. Each provider therefore reports availability independently instead of presenting partial data as authoritative.
+## Current architecture
 
-## Data and privacy
+The app is intentionally split into a few core responsibilities:
 
-The app uses open Hong Kong government/operator feeds and keeps the last successful snapshot locally in SwiftData. Location is optional, remains on-device, and is only used to sort nearby stops. No API secret is embedded in the client.
+- `TransitDomain.swift` defines the transport domain model: stops, routes, arrivals, feed status, and error semantics.
+- `TransitAPI.swift` contains the feed catalog, HTTP client, adapter protocol, provider registry, and merge logic.
+- `TransitRepository.swift` owns the runtime store: refresh orchestration, cache handling, nearby-stop filtering, and favorites persistence.
+- `TransitViews.swift` renders the SwiftUI experience: map, routes, alerts, and settings flows.
+- `LocationStore.swift` handles permission prompts and location updates.
 
-The source catalog is maintained in `HongKongTransitCatalog` and should be extended with each new transport dataset's endpoint, attribution, refresh interval, and decoding fixture.
+The app prefers direct open-data access unless a future server-side normalizer is added through `TransitAggregationClient`.
+
+## Data sources and privacy
+
+The app reads public Hong Kong transport feeds from operator and government endpoints. It keeps only the last successful payload and does not embed API secrets in the client. Location is optional and remains on-device; it is used only to sort nearby stops and select the map center.
+
+## Running the app
+
+Open `TransitApp.xcodeproj` in Xcode and run the `TransitApp` scheme on an iOS Simulator or a connected device.
+
+If you want to validate logic without launching the UI, use the Swift test target in Xcode or run:
+
+```bash
+xcodebuild -project TransitApp.xcodeproj -scheme TransitApp -destination 'platform=iOS Simulator,name=Any iOS Simulator Device' test
+```
+
+## Extending the catalog
+
+`HongKongTransitCatalog` is the single source of truth for provider endpoints. Add a new feed there when introducing a new dataset or a new provider-specific adapter. Keep the payload contract explicit, and prefer per-provider decoding instead of collapsing all upstream feeds into a loosely typed dictionary.
+
+## Related files
+
+- `TransitApp/TransitAPI.swift`
+- `TransitApp/TransitRepository.swift`
+- `TransitApp/TransitDomain.swift`
+- `TransitApp/TransitViews.swift`
+- `TransitAppTests/TransitAppTests.swift`

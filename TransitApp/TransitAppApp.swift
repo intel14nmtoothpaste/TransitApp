@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 
+/// Application entry point for the Hong Kong Transit experience.
 @main
 struct ConnectingHongKongApp: App {
     @StateObject private var transitStore = TransitStore()

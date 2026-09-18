@@ -2,12 +2,17 @@ import Foundation
 
 /// Contract for an optional server-side normalizer. The app can use direct open
 /// feeds by default and inject an implementation for high-frequency ETA polling.
+/// Optional abstraction for a server-side ETA normalizer or aggregation service.
 protocol TransitAggregationClient: Sendable {
     func snapshot(for coordinate: Coordinate?, providers: [String]) async throws -> TransitSnapshot
 }
 
+/// Normalizes provider payloads before they are merged into the app's main store.
 struct TransitNormalizer: Sendable {
     /// Applies provider-independent rules once, after every adapter has decoded its payload.
+    ///
+    /// This currently removes duplicate IDs and invalid coordinates so the UI never renders
+    /// impossible stop locations or duplicate entries from partial provider updates.
     func normalize(_ snapshot: TransitSnapshot) -> TransitSnapshot {
         var normalized = snapshot
         normalized.stops = unique(normalized.stops).filter {

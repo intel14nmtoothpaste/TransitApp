@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 
+/// Identifies the transport class used when rendering icons, labels, and route filtering.
 enum TransitMode: String, Codable, CaseIterable, Identifiable {
     case bus
     case minibus
@@ -23,22 +24,26 @@ enum TransitMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// A station or platform returned from a provider feed.
 struct TransitStop: Codable, Hashable, Identifiable, Sendable {
     let id: String
     let name: String
     let coordinate: Coordinate
     let provider: String
 
+    /// Converts the custom coordinate representation into the Core Location type used by the map view.
     var location: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: coordinate.latitude, longitude: coordinate.longitude)
     }
 }
 
+/// Basic geospatial coordinate used throughout the app's transport model.
 struct Coordinate: Codable, Hashable, Sendable {
     let latitude: Double
     let longitude: Double
 }
 
+/// A service route as published by a transit provider.
 struct TransitRoute: Codable, Hashable, Identifiable, Sendable {
     let id: String
     let operatorName: String
@@ -50,6 +55,7 @@ struct TransitRoute: Codable, Hashable, Identifiable, Sendable {
     let stopIDs: [String]
 }
 
+/// A single next-arrival estimate for a stop, route, or line.
 struct Arrival: Codable, Hashable, Identifiable, Sendable {
     let id: String
     let routeID: String
@@ -61,12 +67,14 @@ struct Arrival: Codable, Hashable, Identifiable, Sendable {
     let provider: String
     let observedAt: Date
 
+    /// Returns the arrival time in whole minutes, clamped to zero when the feed is already due.
     var minutesAway: Int? {
         guard let expectedAt else { return nil }
         return max(0, Int(ceil(expectedAt.timeIntervalSinceNow / 60)))
     }
 }
 
+/// A user-facing service message for a provider or route area.
 struct ServiceAlert: Codable, Hashable, Identifiable, Sendable {
     let id: String
     let title: String
@@ -75,6 +83,7 @@ struct ServiceAlert: Codable, Hashable, Identifiable, Sendable {
     let publishedAt: Date
     let severity: Severity
 
+    /// Severity level from informational updates to active incidents.
     enum Severity: String, Codable, Sendable {
         case info
         case warning
@@ -82,6 +91,7 @@ struct ServiceAlert: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// The complete payload returned by a refresh cycle, including cached provider data.
 struct TransitSnapshot: Codable, Sendable {
     var stops: [TransitStop] = []
     var routes: [TransitRoute] = []
@@ -90,6 +100,7 @@ struct TransitSnapshot: Codable, Sendable {
     var fetchedAt: Date = .now
 }
 
+/// Operational readiness for an upstream transit feed.
 struct FeedStatus: Identifiable, Sendable {
     let id: String
     let name: String
@@ -114,6 +125,7 @@ struct FeedStatus: Identifiable, Sendable {
     }
 }
 
+/// Resulting health of a provider feed after a network or parsing attempt.
 enum FeedHealth: String, Codable, Sendable {
     case healthy
     case stale
@@ -121,6 +133,7 @@ enum FeedHealth: String, Codable, Sendable {
     case unknown
 }
 
+/// Standardized error surfaced by the transit data layer.
 enum TransitError: LocalizedError, Sendable {
     case invalidResponse(URL)
     case unavailable(provider: String, underlying: String)

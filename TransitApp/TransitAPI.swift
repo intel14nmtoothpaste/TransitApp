@@ -1,5 +1,6 @@
 import Foundation
 
+/// Catalog entry describing an upstream transit feed and how frequently it should be refreshed.
 struct TransitEndpoint: Identifiable, Sendable {
     let id: String
     let provider: String
@@ -38,11 +39,16 @@ extension TransitProviderAdapter {
     }
 }
 
+/// Small HTTP helper used by provider adapters when requesting open-data payloads.
 struct TransitHTTPClient: Sendable {
     var session: URLSession = .shared
     var maxAttempts: Int = 3
     var baseRetryDelay: TimeInterval = 0.5
 
+    /// Requests and decodes a JSON payload from a transit feed endpoint.
+    ///
+    /// The helper retries network timeouts and server failures a few times before surfacing the
+    /// underlying `TransitError`, which keeps provider-level health checks meaningful.
     func get<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
         var attempt = 0
         while true {
@@ -228,6 +234,7 @@ extension TransitProvider {
     }
 }
 
+/// Coordinates all provider adapters and combines their snapshots into one app-level view.
 struct TransitProviderRegistry: Sendable {
     let providers: [any TransitProvider]
 
@@ -235,6 +242,7 @@ struct TransitProviderRegistry: Sendable {
         self.providers = providers
     }
 
+    /// Fetches every registry provider concurrently and merges successful results into one snapshot.
     func fetchAll(using client: TransitHTTPClient) async -> (TransitSnapshot, [FeedStatus]) {
         let results = await withTaskGroup(of: (TransitSnapshot, FeedStatus).self, returning: [(TransitSnapshot, FeedStatus)].self) { group in
             for provider in providers {
@@ -264,6 +272,7 @@ struct TransitProviderRegistry: Sendable {
 }
 
 extension TransitSnapshot {
+    /// Merges two snapshots while preferring the latest value for each unique identifier.
     func merged(with other: TransitSnapshot) -> TransitSnapshot {
         var mergedStops: [String: TransitStop] = [:]
         var mergedRoutes: [String: TransitRoute] = [:]
