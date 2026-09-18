@@ -21,6 +21,8 @@ final class TransitStore: ObservableObject {
     @Published private(set) var snapshot = TransitSnapshot()
     @Published private(set) var feedStatuses: [FeedStatus] = []
     @Published private(set) var isRefreshing = false
+    @Published private(set) var dataHealth: FeedHealth = .unknown
+    @Published private(set) var consecutiveRefreshFailures = 0
     @Published var lastError: String?
 
     private let registry: TransitProviderRegistry
@@ -47,13 +49,23 @@ final class TransitStore: ObservableObject {
         let result = await registry.fetchAll(using: client)
         let incoming = result.0
         feedStatuses = result.1
-        if incoming.stops.isEmpty && incoming.arrivals.isEmpty && snapshot.stops.isEmpty {
-            lastError = "No transit feeds are reachable right now. Showing cached data when available."
+        if incoming.stops.isEmpty && incoming.routes.isEmpty && incoming.arrivals.isEmpty && incoming.alerts.isEmpty {
+            consecutiveRefreshFailures += 1
+            dataHealth = .unavailable
+            lastError = result.1.compactMap(\.message).joined(separator: " ")
+            if lastError?.isEmpty == true {
+                lastError = "No transit feeds are reachable right now. Showing cached data when available."
+            }
             return
         }
-        snapshot = snapshot.merged(with: incoming)
-        snapshot.fetchedAt = .now
-        lastError = feedStatuses.first(where: { !$0.isAvailable })?.message
+        if !incoming.stops.isEmpty || !incoming.routes.isEmpty || !incoming.arrivals.isEmpty || !incoming.alerts.isEmpty {
+            snapshot = snapshot.merged(with: incoming)
+            snapshot.fetchedAt = .now
+            consecutiveRefreshFailures = 0
+        }
+        let unavailable = feedStatuses.filter { !$0.isAvailable }
+        dataHealth = unavailable.isEmpty ? .healthy : (snapshot.fetchedAt.timeIntervalSinceNow < -300 ? .stale : .healthy)
+        lastError = unavailable.compactMap(\.message).joined(separator: " ").nilIfEmpty
         saveCache()
     }
 
@@ -62,7 +74,9 @@ final class TransitStore: ObservableObject {
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                try? await Task.sleep(for: .seconds(30))
+                let failures = self?.consecutiveRefreshFailures ?? 0
+                let delay = min(300, 30 * pow(2, Double(failures)))
+                try? await Task.sleep(for: .seconds(delay))
             }
         }
     }
@@ -104,8 +118,16 @@ final class TransitStore: ObservableObject {
         } else {
             modelContext.insert(CachedTransitSnapshot(payload: payload, fetchedAt: snapshot.fetchedAt))
         }
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            lastError = "Transit data refreshed, but could not be saved locally: \(error.localizedDescription)"
+        }
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 extension JSONEncoder {
@@ -113,5 +135,34 @@ extension JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return encoder
+    }
+}
+
+@MainActor
+final class FavoritesStore: ObservableObject {
+    @Published private(set) var stopIDs: Set<String>
+    @Published private(set) var routeIDs: Set<String>
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        stopIDs = Set(defaults.stringArray(forKey: "favoriteStopIDs") ?? [])
+        routeIDs = Set(defaults.stringArray(forKey: "favoriteRouteIDs") ?? [])
+    }
+
+    func toggleStop(_ id: String) {
+        stopIDs.toggleMembership(of: id)
+        defaults.set(Array(stopIDs), forKey: "favoriteStopIDs")
+    }
+
+    func toggleRoute(_ id: String) {
+        routeIDs.toggleMembership(of: id)
+        defaults.set(Array(routeIDs), forKey: "favoriteRouteIDs")
+    }
+}
+
+private extension Set where Element == String {
+    mutating func toggleMembership(of value: String) {
+        if contains(value) { remove(value) } else { insert(value) }
     }
 }

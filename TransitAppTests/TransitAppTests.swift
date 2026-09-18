@@ -52,6 +52,30 @@ struct TransitAppTests {
         #expect(merged.fetchedAt == later.fetchedAt)
     }
 
+    @Test func normalizerRemovesDuplicateAndInvalidStops() {
+        let valid = TransitStop(id: "stop", name: "Central", coordinate: Coordinate(latitude: 22.28, longitude: 114.16), provider: "Stub")
+        let invalid = TransitStop(id: "invalid", name: "Invalid", coordinate: Coordinate(latitude: 200, longitude: 114.16), provider: "Stub")
+        let normalized = TransitNormalizer().normalize(TransitSnapshot(stops: [valid, valid, invalid]))
+
+        #expect(normalized.stops == [valid])
+    }
+
+    @Test func registryExposesFailedProviderHealthInsteadOfSilentlyDroppingError() async {
+        struct FailingProvider: TransitProvider {
+            let providerID = "Failing"
+            let endpoints = [TransitEndpoint(id: "failing", provider: "Failing", mode: .bus, purpose: "test", url: URL(string: "https://example.com")!, refreshInterval: 30)]
+
+            func fetchSnapshot(using client: TransitHTTPClient) async throws -> TransitSnapshot {
+                throw TransitError.unavailable(provider: providerID, underlying: "offline")
+            }
+        }
+
+        let result = await TransitProviderRegistry(providers: [FailingProvider()]).fetchAll(using: TransitHTTPClient(maxAttempts: 1))
+        #expect(result.0.stops.isEmpty)
+        #expect(result.1.first?.health == .unavailable)
+        #expect(result.1.first?.message?.contains("offline") == true)
+    }
+
     @Test func arrivalMinutesAreNeverNegative() {
         let arrival = Arrival(
             id: "arrival",

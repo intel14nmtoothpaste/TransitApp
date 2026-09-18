@@ -5,6 +5,7 @@ import SwiftData
 struct ConnectingHongKongApp: App {
     @StateObject private var transitStore = TransitStore()
     @StateObject private var locationStore = LocationStore()
+    @StateObject private var favoritesStore = FavoritesStore()
     private let modelContainer: ModelContainer
 
     init() {
@@ -20,6 +21,7 @@ struct ConnectingHongKongApp: App {
             TransitAppRootView()
                 .environmentObject(transitStore)
                 .environmentObject(locationStore)
+                .environmentObject(favoritesStore)
                 .modelContainer(modelContainer)
                 .task {
                     transitStore.attach(context: modelContainer.mainContext)

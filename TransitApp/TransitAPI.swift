@@ -22,28 +22,61 @@ enum HongKongTransitCatalog {
     ]
 }
 
-protocol TransitProvider: Sendable {
+protocol TransitProviderAdapter: Sendable {
     var providerID: String { get }
     var endpoints: [TransitEndpoint] { get }
     func fetchSnapshot(using client: TransitHTTPClient) async throws -> TransitSnapshot
+    func normalize(_ snapshot: TransitSnapshot) -> TransitSnapshot
+}
+
+/// Provider implementations decode their payloads and return the app's stable model.
+protocol TransitProvider: TransitProviderAdapter {}
+
+extension TransitProviderAdapter {
+    func normalize(_ snapshot: TransitSnapshot) -> TransitSnapshot {
+        TransitNormalizer().normalize(snapshot)
+    }
 }
 
 struct TransitHTTPClient: Sendable {
     var session: URLSession = .shared
+    var maxAttempts: Int = 3
+    var baseRetryDelay: TimeInterval = 0.5
 
     func get<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
-        var request = URLRequest(url: url)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 15
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw TransitError.invalidResponse(url)
+        var attempt = 0
+        while true {
+            do {
+                var request = URLRequest(url: url)
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+                request.timeoutInterval = 15
+                let (data, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    throw TransitError.invalidResponse(url)
+                }
+                guard (200..<300).contains(http.statusCode) else {
+                    throw TransitError.invalidResponse(url)
+                }
+                do {
+                    return try JSONDecoder.transit.decode(type, from: data)
+                } catch {
+                    throw TransitError.decoding(provider: url.host ?? "Transit", underlying: error.localizedDescription)
+                }
+            } catch {
+                attempt += 1
+                guard attempt < max(1, maxAttempts), Self.isRetryable(error) else { throw error }
+                let delay = baseRetryDelay * pow(2, Double(attempt - 1))
+                try? await Task.sleep(for: .seconds(delay))
+            }
         }
-        do {
-            return try JSONDecoder.transit.decode(type, from: data)
-        } catch {
-            throw TransitError.decoding(provider: url.host ?? "Transit", underlying: error.localizedDescription)
+    }
+
+    private static func isRetryable(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            return [.timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet].contains(urlError.code)
         }
+        if case TransitError.invalidResponse = error { return true }
+        return false
     }
 }
 
@@ -67,11 +100,27 @@ struct KMBProvider: TransitProvider {
             let long: Double
             enum CodingKeys: String, CodingKey { case stop, nameEn = "name_en", lat, long }
         }
-        struct Response: Decodable { let data: [Stop] }
-        let response = try await client.get(Response.self, from: endpoints[0].url)
-        return TransitSnapshot(stops: response.data.map {
+        struct Route: Decodable {
+            let route: String
+            let bound: String?
+            let origin: String
+            let destination: String
+            enum CodingKeys: String, CodingKey { case route, bound, origin, destination }
+        }
+        struct StopResponse: Decodable { let data: [Stop] }
+        struct RouteResponse: Decodable { let data: [Route] }
+        let response = try await client.get(StopResponse.self, from: endpoints[0].url)
+        var snapshot = TransitSnapshot(stops: response.data.map {
             TransitStop(id: $0.stop, name: $0.nameEn, coordinate: .init(latitude: $0.lat, longitude: $0.long), provider: providerID)
         })
+        if let routeEndpoint = endpoints.first(where: { $0.id == "kmb-routes" }) {
+            let routes = try await client.get(RouteResponse.self, from: routeEndpoint.url).data
+            snapshot.routes = routes.map {
+                TransitRoute(id: "\($0.route)-\($0.bound ?? "")", operatorName: providerID, number: $0.route,
+                             origin: $0.origin, destination: $0.destination, mode: .bus, accessible: false, stopIDs: [])
+            }
+        }
+        return snapshot
     }
 }
 
@@ -163,15 +212,18 @@ extension TransitProvider {
         )
     }
 
-    func makeFeedStatus(isAvailable: Bool, lastUpdated: Date? = nil, message: String? = nil) -> FeedStatus {
-        FeedStatus(
+    func makeFeedStatus(isAvailable: Bool, lastUpdated: Date? = nil, message: String? = nil, consecutiveFailures: Int = 0) -> FeedStatus {
+        let stale = lastUpdated.map { Date().timeIntervalSince($0) > fallbackEndpoint.refreshInterval } ?? true
+        return FeedStatus(
             id: providerID,
             name: providerID,
             mode: fallbackEndpoint.mode,
             sourceURL: fallbackEndpoint.url,
             lastUpdated: lastUpdated,
             isAvailable: isAvailable,
-            message: message
+            message: message,
+            health: isAvailable ? (stale ? .stale : .healthy) : .unavailable,
+            consecutiveFailures: consecutiveFailures
         )
     }
 }
@@ -188,10 +240,10 @@ struct TransitProviderRegistry: Sendable {
             for provider in providers {
                 group.addTask {
                     do {
-                        let snapshot = try await provider.fetchSnapshot(using: client)
+                        let snapshot = provider.normalize(try await provider.fetchSnapshot(using: client))
                         return (snapshot, provider.makeFeedStatus(isAvailable: true, lastUpdated: .now))
                     } catch {
-                        return (TransitSnapshot(), provider.makeFeedStatus(isAvailable: false, message: error.localizedDescription))
+                        return (TransitSnapshot(), provider.makeFeedStatus(isAvailable: false, message: error.localizedDescription, consecutiveFailures: client.maxAttempts))
                     }
                 }
             }

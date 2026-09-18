@@ -85,6 +85,7 @@ struct NearbyView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    HealthBadge(health: store.dataHealth)
                     if store.isRefreshing { ProgressView() }
                     Button { Task { await store.refresh(force: true) } } label: {
                         Image(systemName: "arrow.clockwise")
@@ -108,13 +109,15 @@ struct NearbyView: View {
 
                 Text("Nearby stops").font(.title2.bold())
                 ForEach(nearbyStops.prefix(12)) { stop in
-                    Label {
-                        VStack(alignment: .leading) {
-                            Text(stop.name)
-                            Text(stop.provider).font(.caption).foregroundStyle(.secondary)
+                    NavigationLink(destination: StopDetailView(stop: stop)) {
+                        Label {
+                            VStack(alignment: .leading) {
+                                Text(stop.name)
+                                Text(stop.provider).font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "mappin.and.ellipse")
                         }
-                    } icon: {
-                        Image(systemName: "mappin.and.ellipse")
                     }
                 }
             }
@@ -164,12 +167,18 @@ struct RoutesView: View {
 
     var body: some View {
         List(routes) { route in
-            VStack(alignment: .leading, spacing: 6) {
-                Text("\(route.number) · \(route.operatorName)").font(.headline)
-                Text("\(route.origin) → \(route.destination)")
-                Label(route.mode.rawValue.capitalized, systemImage: route.mode.systemImage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            NavigationLink(destination: RouteDetailView(route: route)) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(route.number) · \(route.operatorName)").font(.headline)
+                        Text("\(route.origin) → \(route.destination)")
+                        Label(route.mode.rawValue.capitalized, systemImage: route.mode.systemImage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    FavoriteButton(kind: .route(route.id))
+                }
             }
             .padding(.vertical, 4)
         }
@@ -178,6 +187,127 @@ struct RoutesView: View {
         .overlay {
             if routes.isEmpty {
                 ContentUnavailableView("No routes yet", systemImage: "arrow.triangle.swap", description: Text("Refresh live feeds or try another search."))
+            }
+        }
+    }
+}
+
+struct HealthBadge: View {
+    let health: FeedHealth
+
+    var body: some View {
+        Label(
+            health.rawValue.capitalized,
+            systemImage: health == .healthy ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+        )
+        .font(.caption)
+        .foregroundStyle(health == .healthy ? .green : .orange)
+        .accessibilityLabel("Data health: \(health.rawValue)")
+    }
+}
+
+struct FavoriteButton: View {
+    enum Kind {
+        case stop(String)
+        case route(String)
+    }
+
+    @EnvironmentObject private var favorites: FavoritesStore
+    let kind: Kind
+
+    private var isFavorite: Bool {
+        switch kind {
+        case .stop(let id):
+            favorites.stopIDs.contains(id)
+        case .route(let id):
+            favorites.routeIDs.contains(id)
+        }
+    }
+
+    var body: some View {
+        Button {
+            switch kind {
+            case .stop(let id):
+favorites.toggleStop(id)
+            case .route(let id):
+favorites.toggleRoute(id)
+            }
+        } label: {
+            Image(systemName: isFavorite ? "star.fill" : "star")
+.foregroundStyle(isFavorite ? .yellow : .secondary)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(isFavorite ? "Remove favorite" : "Add favorite")
+    }
+}
+
+struct StopDetailView: View {
+    @EnvironmentObject private var store: TransitStore
+    let stop: TransitStop
+
+    var arrivals: [Arrival] {
+        Array(store.snapshot.arrivals.prefix(12))
+    }
+
+    var body: some View {
+        List {
+            Section {
+HStack {
+    Label(stop.name, systemImage: "mappin.circle.fill")
+        .font(.headline)
+    Spacer()
+    FavoriteButton(kind: .stop(stop.id))
+}
+Text("\(stop.provider) · \(stop.coordinate.latitude, specifier: "%.5f"), \(stop.coordinate.longitude, specifier: "%.5f")")
+    .font(.caption)
+    .foregroundStyle(.secondary)
+            }
+            Section("Upcoming arrivals") {
+if arrivals.isEmpty {
+    Text("No live arrivals are available for this stop.")
+        .foregroundStyle(.secondary)
+} else {
+    ForEach(arrivals) { ArrivalRow(arrival: $0) }
+}
+            }
+        }
+        .navigationTitle(stop.name)
+    }
+}
+
+struct RouteDetailView: View {
+    @EnvironmentObject private var store: TransitStore
+    let route: TransitRoute
+
+    var body: some View {
+        List {
+            Section {
+Label("\(route.number) · \(route.operatorName)", systemImage: route.mode.systemImage)
+    .font(.title3.bold())
+Text("\(route.origin) → \(route.destination)")
+Text(route.accessible ? "Wheelchair accessible" : "Accessibility information unavailable")
+    .font(.caption)
+    .foregroundStyle(.secondary)
+            }
+            Section("Stops") {
+if route.stopIDs.isEmpty {
+    Text("Stop ordering is not provided by this operator feed yet.")
+        .foregroundStyle(.secondary)
+} else {
+    ForEach(route.stopIDs, id: \.self) { stopID in
+        if let stop = store.snapshot.stops.first(where: { $0.id == stopID }) {
+            NavigationLink(stop.name, destination: StopDetailView(stop: stop))
+        } else {
+            Text(stopID)
+        }
+    }
+}
+            }
+        }
+        .navigationTitle("Route \(route.number)")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+FavoriteButton(kind: .route(route.id))
             }
         }
     }
@@ -206,6 +336,7 @@ struct AlertsView: View {
 }
 
 struct SettingsView: View {
+    @EnvironmentObject private var store: TransitStore
     @EnvironmentObject private var location: LocationStore
 
     var body: some View {
@@ -217,6 +348,13 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Data sources") {
+                ForEach(store.feedStatuses) { feed in
+                    HStack {
+                        Label(feed.name, systemImage: feed.health == .healthy ? "checkmark.circle" : "exclamationmark.triangle")
+                        Spacer()
+                        Text(feed.health.rawValue.capitalized).font(.caption).foregroundStyle(feed.health == .healthy ? .green : .orange)
+                    }
+                }
                 Text("Open feeds are queried directly when appropriate. A future aggregation service can be injected for high-frequency ETA normalization without changing this UI.")
                     .font(.footnote)
                 Link("Hong Kong open data catalog", destination: URL(string: "https://data.gov.hk/tc-datasets/category/transport")!)

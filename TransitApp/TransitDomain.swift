@@ -98,6 +98,27 @@ struct FeedStatus: Identifiable, Sendable {
     let lastUpdated: Date?
     let isAvailable: Bool
     let message: String?
+    let health: FeedHealth
+    let consecutiveFailures: Int
+
+    init(id: String, name: String, mode: TransitMode, sourceURL: URL, lastUpdated: Date?, isAvailable: Bool, message: String?, health: FeedHealth = .unknown, consecutiveFailures: Int = 0) {
+        self.id = id
+        self.name = name
+        self.mode = mode
+        self.sourceURL = sourceURL
+        self.lastUpdated = lastUpdated
+        self.isAvailable = isAvailable
+        self.message = message
+        self.health = health
+        self.consecutiveFailures = consecutiveFailures
+    }
+}
+
+enum FeedHealth: String, Codable, Sendable {
+    case healthy
+    case stale
+    case unavailable
+    case unknown
 }
 
 enum TransitError: LocalizedError, Sendable {
