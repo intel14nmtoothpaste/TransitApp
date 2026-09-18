@@ -181,11 +181,25 @@ struct TransitProviderRegistry: Sendable {
 
 extension TransitSnapshot {
     func merged(with other: TransitSnapshot) -> TransitSnapshot {
-        TransitSnapshot(
-            stops: Array(Set(stops + other.stops)),
-            routes: Array(Set(routes + other.routes)),
-            arrivals: Array(Set(arrivals + other.arrivals)),
-            alerts: Array(Set(alerts + other.alerts)),
+        var mergedStops: [String: TransitStop] = [:]
+        var mergedRoutes: [String: TransitRoute] = [:]
+        var mergedArrivals: [String: Arrival] = [:]
+        var mergedAlerts: [String: ServiceAlert] = [:]
+
+        for item in stops { mergedStops[item.id] = item }
+        for item in other.stops { mergedStops[item.id] = item }
+        for item in routes { mergedRoutes[item.id] = item }
+        for item in other.routes { mergedRoutes[item.id] = item }
+        for item in arrivals { mergedArrivals[item.id] = item }
+        for item in other.arrivals { mergedArrivals[item.id] = item }
+        for item in alerts { mergedAlerts[item.id] = item }
+        for item in other.alerts { mergedAlerts[item.id] = item }
+
+        return TransitSnapshot(
+            stops: Array(mergedStops.values),
+            routes: Array(mergedRoutes.values),
+            arrivals: Array(mergedArrivals.values),
+            alerts: Array(mergedAlerts.values),
             fetchedAt: max(fetchedAt, other.fetchedAt)
         )
     }

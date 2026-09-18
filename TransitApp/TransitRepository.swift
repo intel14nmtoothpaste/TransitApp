@@ -73,15 +73,19 @@ final class TransitStore: ObservableObject {
     }
 
     func nearbyStops(around coordinate: CLLocationCoordinate2D, radius: CLLocationDistance = 1_500) -> [TransitStop] {
+        guard radius > 0 else { return [] }
+
         let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        return snapshot.stops
-            .sorted { first, second in
-                origin.distance(from: CLLocation(latitude: first.coordinate.latitude, longitude: first.coordinate.longitude)) <
-                origin.distance(from: CLLocation(latitude: second.coordinate.latitude, longitude: second.coordinate.longitude))
-            }
-            .filter {
-                origin.distance(from: CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)) <= radius
-            }
+        let nearby = snapshot.stops.reduce(into: [(stop: TransitStop, distance: CLLocationDistance)]()) { partial, stop in
+            let stopLocation = CLLocation(latitude: stop.coordinate.latitude, longitude: stop.coordinate.longitude)
+            let distance = origin.distance(from: stopLocation)
+            guard distance <= radius else { return }
+            partial.append((stop, distance))
+        }
+
+        return nearby
+            .sorted { $0.distance < $1.distance }
+            .map(\.stop)
     }
 
     private func loadCache() {
