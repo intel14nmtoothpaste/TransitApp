@@ -97,7 +97,7 @@ struct TransitAppTests {
         )
         let snapshot = TransitSnapshot(stops: [TransitStop(id: "stop-1", name: "Central", coordinate: Coordinate(latitude: 22.28, longitude: 114.16), provider: "KMB")], arrivals: [arrival], fetchedAt: .now)
         let store = TransitStore(registry: TransitProviderRegistry(providers: [StubProvider(providerID: "KMB", snapshot: snapshot)]), client: TransitHTTPClient())
-        let container = try ModelContainer(for: CachedTransitSnapshot.self, configurations: ModelConfiguration(isStoredInMemory: true))
+        let container = try ModelContainer(for: CachedTransitSnapshot.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = ModelContext(container)
 
         store.attach(context: context)
@@ -112,7 +112,7 @@ struct TransitAppTests {
     @Test func transitStoreFallsBackToCachedSnapshotWhenAllFeedsAreEmpty() async throws {
         let cachedStop = TransitStop(id: "stop-1", name: "Central", coordinate: Coordinate(latitude: 22.28, longitude: 114.16), provider: "KMB")
         let cachedSnapshot = TransitSnapshot(stops: [cachedStop], fetchedAt: .now)
-        let container = try ModelContainer(for: CachedTransitSnapshot.self, configurations: ModelConfiguration(isStoredInMemory: true))
+        let container = try ModelContainer(for: CachedTransitSnapshot.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = ModelContext(container)
         let saved = CachedTransitSnapshot(payload: try JSONEncoder.transit.encode(cachedSnapshot), fetchedAt: cachedSnapshot.fetchedAt)
         context.insert(saved)

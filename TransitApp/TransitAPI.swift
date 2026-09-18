@@ -108,11 +108,9 @@ struct CitybusProvider: TransitProvider {
         }
         struct Response: Decodable { let data: Stop }
         let response = try await client.get(Response.self, from: endpoints[0].url)
-        guard let latitude = Double(response.data.lat), let longitude = Double(response.data.long) else {
-            throw TransitError.decoding(provider: providerID, underlying: "Invalid coordinates")
-        }
+        let coordinate = try TransitCoordinateParser.coordinate(latitude: response.data.lat, longitude: response.data.long, provider: providerID)
         return TransitSnapshot(stops: [
-            TransitStop(id: response.data.stop, name: response.data.nameEn, coordinate: .init(latitude: latitude, longitude: longitude), provider: providerID)
+            TransitStop(id: response.data.stop, name: response.data.nameEn, coordinate: coordinate, provider: providerID)
         ])
     }
 }
@@ -137,10 +135,44 @@ struct NLBProvider: TransitProvider {
         struct Response: Decodable { let stops: [Stop]?; let data: [Stop]? }
         let response = try await client.get(Response.self, from: endpoints[0].url)
         let stops = (response.stops ?? response.data ?? []).compactMap { stop -> TransitStop? in
-            guard let latitude = Double(stop.latitude), let longitude = Double(stop.longitude) else { return nil }
-            return TransitStop(id: stop.stopId, name: stop.name, coordinate: .init(latitude: latitude, longitude: longitude), provider: providerID)
+            guard let coordinate = try? TransitCoordinateParser.coordinate(latitude: stop.latitude, longitude: stop.longitude, provider: providerID) else { return nil }
+            return TransitStop(id: stop.stopId, name: stop.name, coordinate: coordinate, provider: providerID)
         }
         return TransitSnapshot(stops: stops)
+    }
+}
+
+enum TransitCoordinateParser {
+    static func coordinate(latitude: String, longitude: String, provider: String) throws -> Coordinate {
+        guard let latitudeValue = Double(latitude), let longitudeValue = Double(longitude) else {
+            throw TransitError.decoding(provider: provider, underlying: "Invalid coordinates")
+        }
+        return Coordinate(latitude: latitudeValue, longitude: longitudeValue)
+    }
+}
+
+extension TransitProvider {
+    var fallbackEndpoint: TransitEndpoint {
+        endpoints.first ?? TransitEndpoint(
+            id: providerID,
+            provider: providerID,
+            mode: .unknown,
+            purpose: "Fallback endpoint",
+            url: URL(string: "https://data.gov.hk")!,
+            refreshInterval: 0
+        )
+    }
+
+    func makeFeedStatus(isAvailable: Bool, lastUpdated: Date? = nil, message: String? = nil) -> FeedStatus {
+        FeedStatus(
+            id: providerID,
+            name: providerID,
+            mode: fallbackEndpoint.mode,
+            sourceURL: fallbackEndpoint.url,
+            lastUpdated: lastUpdated,
+            isAvailable: isAvailable,
+            message: message
+        )
     }
 }
 
@@ -157,9 +189,9 @@ struct TransitProviderRegistry: Sendable {
                 group.addTask {
                     do {
                         let snapshot = try await provider.fetchSnapshot(using: client)
-                        return (snapshot, FeedStatus(id: provider.providerID, name: provider.providerID, mode: provider.endpoints.first?.mode ?? .unknown, sourceURL: provider.endpoints.first?.url ?? URL(string: "https://data.gov.hk")!, lastUpdated: .now, isAvailable: true, message: nil))
+                        return (snapshot, provider.makeFeedStatus(isAvailable: true, lastUpdated: .now))
                     } catch {
-                        return (TransitSnapshot(), FeedStatus(id: provider.providerID, name: provider.providerID, mode: provider.endpoints.first?.mode ?? .unknown, sourceURL: provider.endpoints.first?.url ?? URL(string: "https://data.gov.hk")!, lastUpdated: nil, isAvailable: false, message: error.localizedDescription))
+                        return (TransitSnapshot(), provider.makeFeedStatus(isAvailable: false, message: error.localizedDescription))
                     }
                 }
             }
